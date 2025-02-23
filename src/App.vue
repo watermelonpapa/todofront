@@ -1,40 +1,17 @@
 <script setup>
-import { ref, watch, computed } from 'vue'
+import { ref, watch, computed, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
+import axios from 'axios'
 
-// 重新设计的数据结构
-const list = ref([
-  {
-    id: 1,
-    content: '吃饭',
-    completed: false,
-    completionNote: '',
-    showNoteInput: false,
-    timestamp: Date.now()
-  },
-  {
-    id: 2,
-    content: 'sleep',
-    completed: false,
-    completionNote: '',
-    showNoteInput: false,
-    timestamp: Date.now()
-  },
-  {
-    id: 3,
-    content: 'beat',
-    completed: false,
-    completionNote: '',
-    showNoteInput: false,
-    timestamp: Date.now()
-  }
-])
+const API_URL = 'http://localhost:3000/api/todos'
 
+// 数据状态
+const list = ref([])
 const str = ref({
   text: '',
 })
-
-const activeNames = ref([]) // 用于控制展开面板
+const activeNames = ref([])
+const loading = ref(false)
 
 // 计算属性：对列表进行排序，未完成的在前
 const sortedList = computed(() => {
@@ -44,79 +21,134 @@ const sortedList = computed(() => {
   });
 });
 
-function add(tempdata) {
-  if (str.value.text.trim()) {
-    list.value.push({
-      id: Date.now(),
-      content: str.value.text,
-      completed: false,
-      completionNote: '',
-      showNoteInput: false,
-      timestamp: Date.now()
-    })
-    str.value.text = ''
-    ElMessage.success('添加成功')
-  }
-}
+// 拖拽相关方法
+let draggedIndex = null
 
-// 拖拽相关函数保持不变
 function dragStart(event, index) {
-  event.dataTransfer.setData('index', index)
+  draggedIndex = index
+  event.dataTransfer.effectAllowed = 'move'
 }
 
 function dragOver(event) {
   event.preventDefault()
 }
 
-function drop(event, dropIndex) {
-  const dragIndex = event.dataTransfer.getData('index')
-  const items = [...list.value]
-  const temp = items[dragIndex]
-  items[dragIndex] = items[dropIndex]
-  items[dropIndex] = temp
-  list.value = items
-}
+async function drop(event, index) {
+  event.preventDefault()
+  if (draggedIndex === null || draggedIndex === index) return
 
-// 添加删除函数
-function deleteItem(index) {
-  ElMessage.success('删除成功')
-  list.value.splice(index, 1)
-}
+  // 获取拖拽的项目和目标位置的项目
+  const draggedItem = list.value[draggedIndex]
+  const targetItem = list.value[index]
 
-// 修改 toggleComplete 函数
-function toggleComplete(item) {
-  if (!item.completed) {
-    // 未完成项目点击时，显示输入框
-    item.showNoteInput = true
-    item.timestamp = Date.now()
+  // 更新数组顺序
+  list.value.splice(draggedIndex, 1)
+  list.value.splice(index, 0, draggedItem)
+
+  // 重置拖拽索引
+  draggedIndex = null
+
+  try {
+    // 这里可以添加与后端同步顺序的逻辑，如果需要的话
+    ElMessage.success('排序成功')
+  } catch (error) {
+    ElMessage.error('排序失败')
+    console.error('Error reordering todos:', error)
   }
-  // 已完成项目点击时不做任何处理，保持展开状态即可查看完成说明
 }
 
-// 修改 saveNote 函数
-function saveNote(item) {
+// 获取所有待办事项
+async function fetchTodos() {
+  try {
+    loading.value = true
+    const response = await axios.get(API_URL)
+    list.value = response.data
+  } catch (error) {
+    ElMessage.error('获取待办事项失败')
+    console.error('Error fetching todos:', error)
+  } finally {
+    loading.value = false
+  }
+}
+
+// 添加待办事项
+async function add() {
+  if (str.value.text.trim()) {
+    try {
+      const newTodo = {
+        content: str.value.text,
+        completed: false,
+        completionNote: '',
+        timestamp: new Date().toISOString()
+      }
+      const response = await axios.post(API_URL, newTodo)
+      list.value.push(response.data)
+      str.value.text = ''
+      ElMessage.success('添加成功')
+    } catch (error) {
+      ElMessage.error('添加失败')
+      console.error('Error adding todo:', error)
+    }
+  }
+}
+
+// 删除待办事项
+async function deleteItem(index) {
+  const todo = list.value[index]
+  try {
+    await axios.delete(`${API_URL}/${todo.id}`)
+    list.value.splice(index, 1)
+    ElMessage.success('删除成功')
+  } catch (error) {
+    ElMessage.error('删除失败')
+    console.error('Error deleting todo:', error)
+  }
+}
+
+// 更新待办事项
+async function updateTodo(todo) {
+  try {
+    await axios.put(`${API_URL}/${todo.id}`, todo)
+    return true
+  } catch (error) {
+    ElMessage.error('更新失败')
+    console.error('Error updating todo:', error)
+    return false
+  }
+}
+
+// 切换完成状态
+async function toggleComplete(item) {
+  if (!item.completed) {
+    item.showNoteInput = true
+    item.timestamp = new Date().toISOString()
+  }
+}
+
+// 保存完成说明
+async function saveNote(item) {
   if (item.completionNote.trim()) {
-    item.showNoteInput = false
-    item.completed = true  // 在保存说明时才标记为完成
-    // 保存说明后收起面板
-    activeNames.value = activeNames.value.filter(name => name !== item.id)
-    ElMessage.success('保存成功')
+    item.completed = true
+    if (await updateTodo(item)) {
+      item.showNoteInput = false
+      activeNames.value = activeNames.value.filter(name => name !== item.id)
+      ElMessage.success('保存成功')
+    }
   } else {
     ElMessage.warning('请输入完成说明')
   }
 }
 
-// 新增编辑说明的函数
-function editNote(item) {
-  item.showNoteInput = true
-}
-
-// 添加取消完成说明的函数
+// 取消完成说明
 function cancelNote(item) {
   item.showNoteInput = false
-  item.completionNote = '' // 清空输入的内容
-  // 从展开面板中移除
+  item.completionNote = ''
   activeNames.value = activeNames.value.filter(name => name !== item.id)
+}
+
+// 编辑说明
+function editNote(item) {
+  item.showNoteInput = true
 }
 
 // 格式化时间
@@ -124,11 +156,16 @@ function formatDate(timestamp) {
   const date = new Date(timestamp)
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')} ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`
 }
+
+// 初始化加载数据
+onMounted(() => {
+  fetchTodos()
+})
 </script>
 
 <template>
   <div class="todo-app">
-    <el-card class="box-card">
+    <el-card class="box-card" v-loading="loading">
       <template #header>
         <div class="card-header">
           <span class="title">Todo App</span>
