@@ -2,7 +2,7 @@
 import { ref, watch, computed, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import axios from 'axios'
-
+import mytest from './components/mytest.vue'
 const API_URL = 'http://localhost:3000/api/todos'
 
 // 数据状态
@@ -184,7 +184,7 @@ onMounted(() => {
           </template>
         </el-input>
       </div>
-
+      <mytest />
       <el-collapse v-model="activeNames">
         <div
           v-for="(item, index) in sortedList"
